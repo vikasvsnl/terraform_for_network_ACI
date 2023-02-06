@@ -1,0 +1,201 @@
+terraform {
+  required_providers {
+    aci = {
+      source = "CiscoDevNet/aci"
+      version = "2.6.0"
+    }
+  }
+}
+
+provider "aci" {
+  username = "admin"
+  password = "admin"
+  url      = "https://apic.com/"
+  insecure = true
+}
+
+# Vlan pool 
+resource "aci_vlan_pool" "VLANS_MPLS" {
+  name  = "VLANS_MPLS"
+  description = "From Terraform"
+  alloc_mode  = "static"
+}
+
+resource "aci_ranges" "range_1" {
+  vlan_pool_dn  = aci_vlan_pool.VLANS_MPLS.id
+  description   = "From Terraform"
+  from          = "vlan-200"
+  to            = "vlan-210"
+  alloc_mode    = "inherit"
+  role          = "external"
+}
+
+### Physical domain
+
+resource "aci_l3_domain_profile" "RDOM-MPLS" {
+  name  = "RDOM-MPLS"
+  relation_infra_rs_vlan_ns = aci_vlan_pool.VLANS_MPLS.id
+}
+
+### AAEP
+resource "aci_attachable_access_entity_profile" "AAEP-MPLS" {
+  description = "AAEP INFRA"
+  name        = "AAEP-MPLS"
+  relation_infra_rs_dom_p =       [aci_l3_domain_profile.RDOM-MPLS.id]
+}
+
+# CDP and LLDP Config
+resource "aci_cdp_interface_policy" "CDP-OFF" {
+  name        = "CDP_OFF"
+  admin_st    = "enabled"
+  description = "From Terraform"
+}
+
+resource "aci_lldp_interface_policy" "LLDP-OFF" {
+  description = "example description"
+  name        = "LLDP_OFF"
+  admin_rx_st = "enabled"
+  admin_tx_st = "enabled"
+} 
+
+
+
+
+# Creating interface policy group
+
+resource "aci_leaf_access_bundle_policy_group" "IPG-PC-BL-MPLS" {
+    name                            = "IPG-PC-BL-MPLS"
+    relation_infra_rs_cdp_if_pol    = aci_cdp_interface_policy.CDP-OFF.id
+    relation_infra_rs_lldp_if_pol   = aci_lldp_interface_policy.LLDP-OFF.id
+    relation_infra_rs_att_ent_p     = aci_attachable_access_entity_profile.AAEP-MPLS.id
+}
+
+# Creating interface profile
+
+resource "aci_leaf_interface_profile" "IPR-BL101" {
+    name                            = "IPR-BL101"
+}
+
+## Creating interface or port selector
+resource "aci_access_port_selector" "PORT1" {
+    leaf_interface_profile_dn      = aci_leaf_interface_profile.IPR-BL101.id
+    name                           = "PORT1"
+    access_port_selector_type      = "range"
+    relation_infra_rs_acc_base_grp = aci_leaf_access_bundle_policy_group.IPG-PC-BL-MPLS.id
+}
+
+### creating port number
+
+resource "aci_access_port_block" "port_block" {
+    access_port_selector_dn = aci_access_port_selector.PORT1.id
+    name                    = "port_block"
+    from_card               = "1"
+    from_port               = "1"
+    to_card                 = "1"
+    to_port                 = "1"
+}
+
+### leaf Profile
+
+resource "aci_leaf_profile" "BL101-PROFILE" {
+    name                         = "BL101-PROFILE"
+    relation_infra_rs_acc_port_p = [aci_leaf_interface_profile.IPR-BL101.id]
+}
+
+resource "aci_leaf_selector" "L101" {
+    leaf_profile_dn         = aci_leaf_profile.BL101-PROFILE.id
+    name                    = "L101"
+    switch_association_type = "range"
+}
+
+resource "aci_node_block" "LEAF_BLOCK" {
+    switch_association_dn = aci_leaf_selector.L101.id
+    name                  = "101"
+    from_                 = 101
+    to_                   = 101
+}
+
+
+### Creating Tenant
+
+resource "aci_tenant" "TEST_tenant" {
+  name        = "TEST_tenant"
+  description = "from terraform"
+   }
+
+# referance common tenant from ACI
+data "aci_tenant" "common" {
+  name  = "common"
+}
+# referance vrf from common tenant 
+
+data "aci_vrf" "default" {
+  tenant_dn  = data.aci_tenant.common.id
+  name       = "default"
+}
+
+# creating L3 out 
+resource "aci_l3_outside" "BL-MPLS-CMN" {
+  tenant_dn      = aci_tenant.TEST_tenant.id
+  name           = "BL-MPLS-CMN"
+  relation_l3ext_rs_l3_dom_att = aci_l3_domain_profile.RDOM-MPLS.id
+  relation_l3ext_rs_ectx = data.aci_vrf.default.id
+}
+
+# taking default contract from common tenant
+data "aci_contract" "default" {
+  tenant_dn  = data.aci_tenant.common.id
+  name       = "default"
+}
+
+# creating external EPG
+resource "aci_external_network_instance_profile" "external_epg" {
+  l3_outside_dn = aci_l3_outside.BL-MPLS-CMN.id
+  name          = "external_epg"
+  relation_fv_rs_prov = [data.aci_contract.default.id]
+  relation_fv_rs_cons = [data.aci_contract.default.id]
+}
+
+# creating node profile
+resource "aci_logical_node_profile" "BL-101-NP" {
+        l3_outside_dn = aci_l3_outside.BL-MPLS-CMN.id
+        description   = "sample logical node profile"
+        name          = "BL-101-NP"
+      }
+
+# configuring logical node
+resource "aci_logical_node_to_fabric_node" "example" {
+  logical_node_profile_dn  = aci_logical_node_profile.BL-101-NP.id
+  tdn               = "topology/pod-1/node-101"
+  annotation        = "annotation"
+  config_issues     = "none"
+  rtr_id            = "10.0.1.1"
+  rtr_id_loop_back  = "no"
+}
+
+# interface profile
+ resource "aci_logical_interface_profile" "BL-101-IPv4-IP" {
+        logical_node_profile_dn = aci_logical_node_profile.BL-101-NP.id
+        description             = "Sample logical interface profile"
+        name                    = "BL-101-IPv4-IP"
+ }
+
+# defining path attachment
+ resource "aci_l3out_path_attachment" "interface_path" {
+  logical_interface_profile_dn  = aci_logical_interface_profile.BL-101-IPv4-IP.id
+  target_dn  = "topology/pod-1/paths-101/pathep-[IPG-PC-BL-MPLS]"
+  if_inst_t = "sub-interface"
+  description = "from terraform"
+  addr  = "195.168.1.1/30"
+  annotation  = "example"
+  autostate = "disabled"
+  encap  = "vlan-202"
+}
+####BGP peer profile
+resource "aci_bgp_peer_connectivity_profile" "bgp_peer" {
+  parent_dn           = aci_l3out_path_attachment.interface_path.id
+  addr                = "195.168.1.2"
+  description         = "from terraform"
+  as_number           = "1"
+  admin_state         = "enabled"
+}
