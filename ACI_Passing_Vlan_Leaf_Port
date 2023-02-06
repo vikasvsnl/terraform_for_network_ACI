@@ -1,0 +1,178 @@
+terraform {
+  required_providers {
+    aci = {
+      source = "CiscoDevNet/aci"
+      version = "2.6.0"
+    }
+  }
+}
+
+provider "aci" {
+  username = "admin"
+  password = "admin"
+  url      = "https://apic1.dcloud.cisco.com/"
+  insecure = true
+}
+
+# Vlan pool 
+resource "aci_vlan_pool" "INFRA" {
+  name  = "INFRA"
+  description = "From Terraform"
+  alloc_mode  = "static"
+}
+
+resource "aci_ranges" "range_1" {
+  vlan_pool_dn  = aci_vlan_pool.INFRA.id
+  description   = "From Terraform"
+  from          = "vlan-100"
+  to            = "vlan-200"
+  alloc_mode    = "inherit"
+  role          = "external"
+}
+
+### Physical domain
+resource "aci_physical_domain" "PHYDOM-INFRA" {
+  name        = "PHYDOM-INFRA"
+  relation_infra_rs_vlan_ns = aci_vlan_pool.INFRA.id
+}
+
+### AAEP
+resource "aci_attachable_access_entity_profile" "AAEP-INFRA" {
+  description = "AAEP INFRA"
+  name        = "AAEP-INFRA"
+  relation_infra_rs_dom_p =       [aci_physical_domain.PHYDOM-INFRA.id]
+}
+
+# CDP and LLDP Config
+resource "aci_cdp_interface_policy" "CDP-ON" {
+  name        = "CDP_ON"
+  admin_st    = "enabled"
+  description = "From Terraform"
+}
+
+resource "aci_lldp_interface_policy" "LLDP-ON" {
+  description = "example description"
+  name        = "LLDP_ON"
+  admin_rx_st = "enabled"
+  admin_tx_st = "enabled"
+} 
+
+### read CDP & LLDP value with data object
+data "aci_cdp_interface_policy" "CDP-ON" {
+    name = "CDP_ON"
+}
+
+data "aci_lldp_interface_policy" "LLDP-ON" {
+    name = "LLDP_ON"
+ }
+
+
+# Creating interface policy group
+
+resource "aci_leaf_access_port_policy_group" "IPG-INFRA" {
+    name                            = "IPG-INFRA"
+    relation_infra_rs_cdp_if_pol    = data.aci_cdp_interface_policy.CDP-ON.id
+    relation_infra_rs_lldp_if_pol   = data.aci_lldp_interface_policy.LLDP-ON.id
+    relation_infra_rs_att_ent_p     = aci_attachable_access_entity_profile.AAEP-INFRA.id
+}
+
+# Creating interface profile
+
+resource "aci_leaf_interface_profile" "IPR-L101" {
+    name                            = "IPR-L101"
+}
+
+## Creating interface or port selector
+resource "aci_access_port_selector" "PORT1" {
+    leaf_interface_profile_dn      = aci_leaf_interface_profile.IPR-L101.id
+    name                           = "PORT1"
+    access_port_selector_type      = "range"
+    relation_infra_rs_acc_base_grp = aci_leaf_access_port_policy_group.IPG-INFRA.id
+}
+
+### creating port number
+
+resource "aci_access_port_block" "port_block" {
+    access_port_selector_dn = aci_access_port_selector.PORT1.id
+    name                    = "port_block"
+    from_card               = "1"
+    from_port               = "1"
+    to_card                 = "1"
+    to_port                 = "1"
+}
+
+### leaf Profile
+
+resource "aci_leaf_profile" "L101-PROFILE" {
+    name                         = "L101-PROFILE"
+    relation_infra_rs_acc_port_p = [aci_leaf_interface_profile.IPR-L101.id]
+}
+
+resource "aci_leaf_selector" "L101" {
+    leaf_profile_dn         = aci_leaf_profile.L101-PROFILE.id
+    name                    = "L101"
+    switch_association_type = "range"
+}
+
+resource "aci_node_block" "LEAF_BLOCK" {
+    switch_association_dn = aci_leaf_selector.L101.id
+    name                  = "101"
+    from_                 = 101
+    to_                   = 101
+}
+
+
+### Creating Tenant
+resource "aci_tenant" "TEST_tenant" {
+  name        = "TEST_tenant"
+  description = "from terraform"
+}
+# Creating application profile
+resource "aci_application_profile" "ap_web_server" {
+  tenant_dn  = aci_tenant.TEST_tenant.id
+  name       = "ap_web_server"
+  description = "from terraform"
+}
+# Creating Bridge Domain
+ resource "aci_bridge_domain" "BDI101" {
+        tenant_dn                   = aci_tenant.TEST_tenant.id
+        description                 = "from terraform"
+        name                        = "BDI101"
+ }
+# Creating EPG 
+resource "aci_application_epg" "EPG-VLAN-101" {
+    application_profile_dn  = aci_application_profile.ap_web_server.id
+    name                              = "EPG-VLAN-101"
+    description                   = "from terraform"
+    exception_tag                 = "0"
+    flood_on_encap            = "disabled"
+    fwd_ctrl                      = "none"
+    has_mcast_source             = "no"
+    is_attr_based_epg         = "no"
+    match_t                          = "AtleastOne"
+    name_alias                  = "alias_epg"
+    pc_enf_pref                  = "unenforced"
+    pref_gr_memb                  = "exclude"
+    prio                              = "unspecified"
+    shutdown                      = "no"
+    relation_fv_rs_bd       = aci_bridge_domain.BDI101.id
+}
+# adding static ports to epg
+resource "aci_epg_to_static_path" "leaf_port_1_1" {
+  application_epg_dn  = aci_application_epg.EPG-VLAN-101.id
+  tdn  = "topology/pod-1/paths-101/pathep-[eth1/1]"
+  annotation = "annotation"
+  encap  = "vlan-101"
+  instr_imedcy = "immediate"
+  mode  = "regular"
+}
+# reading data for physical domain
+data "aci_physical_domain" "PHYDOM-INFRA" {
+  name  = "PHYDOM-INFRA"
+}
+# attaching EPG to domain
+resource "aci_epg_to_domain" "ap_epg_phy_domain" {
+  application_epg_dn    = aci_application_epg.EPG-VLAN-101.id
+  tdn                   = aci_physical_domain.PHYDOM-INFRA.id
+  
+  }
