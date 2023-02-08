@@ -1,0 +1,64 @@
+# Provider block
+
+terraform {
+  required_providers {
+    aci = {
+      source = "CiscoDevNet/aci"
+      version = "2.6.0"
+    }
+  }
+}
+
+provider "aci" {
+  username = "admin"
+  password = "C1sco12345"
+  url      = "https://apic1.dcloud.cisco.com/"
+  insecure = true
+}
+
+### Physical domain
+resource "aci_physical_domain" "PHYDOM-INFRA" {
+  name        = "PHYDOM-INFRA"
+}
+### Creating Tenant
+resource "aci_tenant" "Cloud_tenant" {
+  name        = "Cloud_tenant"
+  description = "from terraform"
+}
+
+# Creating application profile
+resource "aci_application_profile" "ap_web_server" {
+  tenant_dn  = aci_tenant.Cloud_tenant.id
+  name       = "ap_web_server"
+  description = "from terraform"
+}
+
+# Creating BD with loop
+resource "aci_bridge_domain" "bridge_domain" {
+    tenant_dn  = aci_tenant.Cloud_tenant.id
+    for_each = var.bridge_domains
+    name =     each.value.name
+    arp_flood = each.value.arp_flood
+}
+ # attaching subnet with loop
+ resource "aci_subnet" "bd_subnet" {
+        for_each = var.bridge_domains
+        parent_dn        = aci_bridge_domain.bridge_domain[each.value.name].id
+        ip               = each.value.ip
+ }
+
+ # Creating EPG 
+resource "aci_application_epg" "EPG" {
+    application_profile_dn  = aci_application_profile.ap_web_server.id
+    for_each = var.epgs
+    name                              = each.key
+    description                   = "from terraform"
+    shutdown                      = "no"
+    relation_fv_rs_bd       = aci_bridge_domain.bridge_domain[each.value.bd].id
+}
+
+resource "aci_epg_to_domain" "epg_to_domain" {
+       for_each = var.epgs
+       tdn = aci_physical_domain.PHYDOM-INFRA.id
+       application_epg_dn = aci_application_epg.EPG[each.key].id
+}
