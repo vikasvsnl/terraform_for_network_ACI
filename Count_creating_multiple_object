@@ -1,0 +1,58 @@
+# Provider block
+
+terraform {
+  required_providers {
+    aci = {
+      source = "CiscoDevNet/aci"
+      version = "2.6.0"
+    }
+  }
+}
+
+provider "aci" {
+  username = "admin"
+  password = "C"
+  url      = "https://apic1.com/"
+  insecure = true
+}
+
+### Physical domain
+resource "aci_physical_domain" "PHYDOM-INFRA" {
+  name        = "PHYDOM-INFRA"
+}
+### Creating Tenant
+resource "aci_tenant" "Cloud_tenant" {
+  name        = "Cloud_tenant"
+  description = "from terraform"
+}
+
+# Creating application profile
+resource "aci_application_profile" "ap_web_server" {
+  tenant_dn  = aci_tenant.Cloud_tenant.id
+  name       = "ap_web_server"
+  description = "from terraform"
+}
+
+# Creating BD with Count
+resource "aci_bridge_domain" "bridge_domain" {
+    tenant_dn  = aci_tenant.Cloud_tenant.id
+    count = 10
+    name =     "BDI${count.index +500}"
+    arp_flood = "no"
+}
+
+ # Creating EPG 
+resource "aci_application_epg" "EPG" {
+    application_profile_dn  = aci_application_profile.ap_web_server.id
+    count =10
+    name                              = "EPG-${count.index}"
+    description                   = "from terraform"
+    shutdown                      = "no"
+    relation_fv_rs_bd       = aci_bridge_domain.bridge_domain[count.index].id
+}
+
+resource "aci_epg_to_domain" "epg_to_domain" {
+       tdn = aci_physical_domain.PHYDOM-INFRA.id
+	   count = 10
+       application_epg_dn = aci_application_epg.EPG[count.index].id
+}
