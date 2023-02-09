@@ -11,8 +11,8 @@ terraform {
 
 provider "aci" {
   username = "admin"
-  password = "C1sco12345"
-  url      = "https://apic1.dcloud.cisco.com/"
+  password = "C"
+  url      = "https://apic1.cisco.com/"
   insecure = true
 }
 
