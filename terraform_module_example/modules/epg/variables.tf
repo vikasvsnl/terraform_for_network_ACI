@@ -13,3 +13,6 @@ variable "app_epg" {
 variable "tenant_output" {
     default = ""
     }
+variable "phydm_output" {
+    default = ""
+}
