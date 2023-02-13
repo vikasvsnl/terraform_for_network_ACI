@@ -14,3 +14,9 @@ resource "aci_application_epg" "epg" {
 output "application_output" {
     value = "${aci_application_profile.ap_web_server.id}"
     }
+
+resource "aci_epg_to_domain" "ap_epg_phy_domain" {
+  application_epg_dn    = aci_application_epg.epg.id
+  tdn                   = var.phydm_output
+
+  }
