@@ -18,6 +18,7 @@ provider "aci" {
 
 module "infra_vlan_pool" {
   source = "../modules/vlan_pool"
+  phydm_output = module.phydomain.phydm_output
 }
 
 module "phydomain" {
@@ -40,3 +41,13 @@ module "interface_profile" {
   ipg_output = module.interface_policy_group.ipg_output
 
 }
+  
+module "Leaf_profile" {
+  source = "../modules/Leaf_profile"
+  ipr_output = module.interface_profile.ipr_output
+  leaf_profile_name = "L101_PROFILE"
+  leaf_block = "101"
+  leaf_name = "L101"
+  leaf_number = "101"
+}
+
