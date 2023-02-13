@@ -50,3 +50,8 @@ module "infra_epg" {
   tenant_output = module.infra_tenant.tenant_output
 
 }
+
+module "phydomain" {
+  source = "../modules/phydomain"
+
+}
