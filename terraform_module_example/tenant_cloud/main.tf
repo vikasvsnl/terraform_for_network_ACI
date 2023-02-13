@@ -37,7 +37,7 @@ module "infra_bridge_domain500" {
 module "infra_bridge_domain501" {
   source = "../modules/bridge_domain"
   count = 100
-  bdi = "BDI${count,index}"
+  bdi = "BDI${count.index}"
   tenant_output = module.infra_tenant.tenant_output
   vrf_output = module.infra_vrf.vrf_output
 
@@ -48,6 +48,7 @@ module "infra_epg" {
   bridge_output = module.infra_bridge_domain500.bridge_output
   application_output = module.infra_epg.application_output
   tenant_output = module.infra_tenant.tenant_output
+  phydm_output = module.phydomain.phydm_output
 
 }
 
